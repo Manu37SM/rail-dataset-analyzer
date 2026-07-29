@@ -16,6 +16,15 @@ def print_validation_report(report):
     print(f"Rows    : {report['total_rows']}")
     print(f"Columns : {report['total_columns']}")
 
+    quality_score = report.get("quality_score")
+    if quality_score:
+        print(
+            f"Quality Score : {quality_score['score']}/100 "
+            f"(grade {quality_score['grade']})"
+        )
+        for deduction in quality_score["deductions"]:
+            print(f"  -{deduction['points']:>3} : {deduction['reason']}")
+
     if report["errors"]:
         print("ERRORS:")
         for error in report["errors"]:

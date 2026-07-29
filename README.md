@@ -23,19 +23,56 @@ Install dependencies with:
 pip install -r requirements.txt
 ```
 
+For running the test suite, install the dev requirements instead (installs
+pytest on top of the runtime ones above):
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ## Usage
+
+### Migration (compare old vs. new and produce import-ready output)
 
 ```bash
 python src/main.py --old <old_dataset.csv> --new <new_dataset.csv> [--station-master input/station_master.csv]
 ```
 
+### Validation only (no migration - just check whether a dataset is structurally sound)
+
+Point this at a single dataset (or both) before deciding whether it's even
+worth feeding into a migration. Detects the dataset's shape (`per_stop` vs
+`per_train` - see `validator.py`), missing required columns, duplicate
+rows/keys, blank required fields, and basic statistics (unique trains,
+unique stations, stops per train).
+
+```bash
+python src/main.py --validate --old <old_dataset.csv> [--new <new_dataset.csv>]
+```
+
+Writes `output/validation_report.json` in addition to printing a summary.
+
 ### Arguments
 
 | Argument           | Description                                      | Default                      |
 |--------------------|--------------------------------------------------|------------------------------|
-| `--old`            | Path to the old RailLens dataset CSV             | (required)                   |
-| `--new`            | Path to the new railway dataset CSV              | (required)                   |
+| `--old`            | Path to the old RailLens dataset CSV             | required unless `--validate` is used with only `--new` |
+| `--new`            | Path to the new railway dataset CSV              | required unless `--validate` is used with only `--old` |
 | `--station-master` | Path to station master CSV                       | `input/station_master.csv`   |
+| `--validate`       | Run structural validation only (see above) instead of a full migration | off |
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Tests live in `tests/` and currently cover `validator.py` (dataset shape
+detection, required-field checks, duplicate detection, statistics) and
+`normalizer.py` (station/train name normalization rules). `tests/conftest.py`
+adds `src/` to the import path so tests can import modules the same flat
+way `main.py` does.
 
 ### Output
 
@@ -64,7 +101,13 @@ src/
 ├── migration_builder.py      # Builds import-ready rows from parsed schedules
 ├── migration_engine.py       # Orchestrates the full migration pipeline
 ├── migration_report.py       # Generates summary and per-category CSV/JSON reports
-└── exporter.py               # Exports results to CSV and JSON files
+├── exporter.py               # Exports results to CSV and JSON files
+└── validator.py               # Standalone structural validation (--validate mode)
+
+tests/
+├── conftest.py               # Adds src/ to sys.path for tests
+├── test_validator.py         # DatasetValidator tests
+└── test_normalizer.py        # normalize_name() tests
 ```
 
 ## How It Works

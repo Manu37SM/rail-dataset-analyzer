@@ -77,6 +77,7 @@ class DatasetValidator:
             "errors": [],
             "warnings": [],
             "statistics": {},
+            "quality_score": None,
         }
 
         detected = self._detect_columns(df, report)
@@ -90,13 +91,19 @@ class DatasetValidator:
         # A dataset missing a required field can't go any further - the
         # rest of these checks all assume the columns they need exist, so
         # bail out early with a clear reason rather than a confusing
-        # downstream KeyError.
+        # downstream KeyError. A dataset that can't even be parsed is the
+        # worst possible outcome, so it scores 0 rather than leaving
+        # quality_score empty (which a caller could mistake for "not yet
+        # computed" instead of "unusable").
         if shape is None:
             report["errors"].append(
                 "Could not determine dataset shape - it has neither a "
                 "(station code + sequence) per-stop layout nor a "
                 "(source + destination station) per-train layout. "
                 f"Detected columns: {report['detected_columns']}"
+            )
+            report["quality_score"] = self._zero_score(
+                "Dataset shape could not be determined."
             )
             return report
 
@@ -106,13 +113,118 @@ class DatasetValidator:
                 "required column(s): " + ", ".join(missing)
                 + " - cannot be parsed into schedules as-is."
             )
+            report["quality_score"] = self._zero_score(
+                "Required column(s) missing: " + ", ".join(missing)
+            )
             return report
 
         self._check_duplicates(df, detected, report, shape)
         self._check_blank_values(df, detected, report, required_fields)
         self._compute_statistics(df, detected, report, shape)
+        self._compute_quality_score(df, report, required_fields)
 
         return report
+
+    # ------------------------------------------------------------
+
+    def _zero_score(self, reason):
+
+        return {
+            "score": 0,
+            "grade": "F",
+            "deductions": [{"reason": reason, "points": 100}],
+        }
+
+    def _grade_for(self, score):
+
+        if score >= 90:
+            return "A"
+        if score >= 75:
+            return "B"
+        if score >= 60:
+            return "C"
+        if score >= 40:
+            return "D"
+        return "F"
+
+    def _compute_quality_score(self, df, report, required_fields):
+        """
+        A single 0-100 number summarizing everything the earlier checks
+        already found, so a human (or an admin-panel widget) can triage
+        many datasets at a glance instead of reading every warning.
+
+        Deliberately built from the *existing* warnings/statistics rather
+        than re-deriving anything - this keeps the score consistent with
+        the printed report by construction, and means any future check
+        added to _check_duplicates/_check_blank_values automatically has
+        no effect on scoring unless it's wired in below explicitly (no
+        surprise score swings from unrelated changes).
+
+        Weights are a judgment call, not a spec: duplicates and blank
+        required fields are the two failure modes that actually break
+        import (collisions / unusable rows), so they dominate the score.
+        Row-count is intentionally excluded - a small-but-clean dataset
+        shouldn't score worse than a large-but-dirty one.
+        """
+
+        stats = report["statistics"]
+        total_rows = max(report["total_rows"], 1)
+        deductions = []
+
+        duplicate_rows = stats.get("duplicate_rows", 0)
+        if duplicate_rows:
+            points = min(20, round(duplicate_rows / total_rows * 100))
+            deductions.append({
+                "reason": f"{duplicate_rows} fully duplicated row(s).",
+                "points": points,
+            })
+
+        collision_count = stats.get(
+            "duplicate_train_sequence_pairs",
+            stats.get("duplicate_train_number_rows", 0),
+        )
+        if collision_count:
+            points = min(30, round(collision_count / total_rows * 150))
+            deductions.append({
+                "reason": (
+                    f"{collision_count} row(s) collide on the field(s) "
+                    "the backend treats as unique - these will fail or "
+                    "overwrite each other on import."
+                ),
+                "points": points,
+            })
+
+        blank_counts = stats.get("blank_required_field_counts", {})
+        total_blanks = sum(blank_counts.values())
+        if total_blanks:
+            denominator = total_rows * max(len(required_fields), 1)
+            points = min(30, round(total_blanks / denominator * 100))
+            deductions.append({
+                "reason": (
+                    f"{total_blanks} blank value(s) across required "
+                    "field(s): " + ", ".join(
+                        f"{k}={v}" for k, v in blank_counts.items() if v
+                    )
+                ),
+                "points": points,
+            })
+
+        if report["warnings"] and not deductions:
+            # Some other warning fired that isn't one of the scored
+            # categories above - dock a small flat amount rather than
+            # silently giving a perfect score while a warning is showing.
+            deductions.append({
+                "reason": "Warning(s) present outside scored categories.",
+                "points": 5,
+            })
+
+        score = max(0, 100 - sum(d["points"] for d in deductions))
+
+        report["quality_score"] = {
+            "score": score,
+            "grade": self._grade_for(score),
+            "deductions": deductions,
+        }
 
     # ------------------------------------------------------------
 

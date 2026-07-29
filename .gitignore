@@ -36,3 +36,6 @@ input/
 # Logs / temp
 *.log
 *.tmp
+
+# Test cache
+.pytest_cache/
