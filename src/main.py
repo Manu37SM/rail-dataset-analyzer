@@ -1,10 +1,66 @@
 import argparse
+import json
+import os
 
 from loader import load_dataset
 from station_master import load_station_master
+from validator import DatasetValidator
 
 from migration_engine import MigrationEngine
 from exporter import DatasetExporter
+
+
+def print_validation_report(report):
+
+    print(f"\n--- {report['label']} ---")
+    print(f"Rows    : {report['total_rows']}")
+    print(f"Columns : {report['total_columns']}")
+
+    if report["errors"]:
+        print("ERRORS:")
+        for error in report["errors"]:
+            print(f"  - {error}")
+        return
+
+    if report["warnings"]:
+        print("WARNINGS:")
+        for warning in report["warnings"]:
+            print(f"  - {warning}")
+    else:
+        print("No warnings.")
+
+    print("Statistics:")
+    for key, value in report["statistics"].items():
+        print(f"  {key}: {value}")
+
+
+def run_validation(args):
+
+    validator = DatasetValidator()
+    reports = []
+
+    if args.old:
+        old_df = load_dataset(args.old)
+        reports.append(validator.validate(old_df, label=f"OLD: {args.old}"))
+
+    if args.new:
+        new_df = load_dataset(args.new)
+        reports.append(validator.validate(new_df, label=f"NEW: {args.new}"))
+
+    print("=" * 70)
+    print("RailLens Dataset Validation")
+    print("=" * 70)
+
+    for report in reports:
+        print_validation_report(report)
+
+    os.makedirs("output", exist_ok=True)
+    report_path = os.path.join("output", "validation_report.json")
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(reports, f, indent=4)
+
+    print(f"\nGenerated: {report_path}")
 
 
 def main():
@@ -15,13 +71,13 @@ def main():
 
     parser.add_argument(
         "--old",
-        required=True,
+        required=False,
         help="Old RailLens dataset"
     )
 
     parser.add_argument(
         "--new",
-        required=True,
+        required=False,
         help="New railway dataset"
     )
 
@@ -31,7 +87,29 @@ def main():
         help="Station master CSV"
     )
 
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help=(
+            "Only run structural validation and print dataset statistics "
+            "(row/column counts, duplicate detection, blank required "
+            "fields) for --old and/or --new, without running a migration. "
+            "Does not require --station-master."
+        )
+    )
+
     args = parser.parse_args()
+
+    if args.validate:
+
+        if not args.old and not args.new:
+            parser.error("--validate requires at least one of --old or --new")
+
+        run_validation(args)
+        return
+
+    if not args.old or not args.new:
+        parser.error("--old and --new are required unless --validate is used alone")
 
     print("=" * 70)
     print("RailLens Dataset Migration Engine")
