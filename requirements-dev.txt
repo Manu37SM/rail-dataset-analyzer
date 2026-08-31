@@ -1,4 +1,4 @@
 # Dev/test-only dependencies. Not needed to run the analyzer itself (see
 # requirements.txt) - only to run its test suite (tests/).
 -r requirements.txt
-pytest>=8.0.0
+pytest>=9.1.1
